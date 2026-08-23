@@ -656,8 +656,36 @@ def render_compat():
 # ──────────────────────────────────────────────
 # Streamlit UI
 # ──────────────────────────────────────────────
+def _app_password():
+    try:
+        return st.secrets.get("APP_PASSWORD", "")
+    except Exception:
+        return ""
+
+
+def check_password():
+    """접속 비밀번호. 시크릿 APP_PASSWORD가 있으면 잠금, 없으면 개방(로컬/미설정)."""
+    pw = _app_password()
+    if not pw:
+        return True
+    if st.session_state.get("auth_ok"):
+        return True
+    st.title("🔒 사주 운세 — 접속")
+    st.text_input("접속 비밀번호", type="password", key="pw_input")
+    if st.button("입장", type="primary"):
+        if st.session_state.get("pw_input") == pw:
+            st.session_state["auth_ok"] = True
+            st.rerun()
+        else:
+            st.error("비밀번호가 올바르지 않습니다.")
+    st.caption("담당자에게 받은 접속 비밀번호를 입력하세요.")
+    return False
+
+
 def main():
     st.set_page_config(page_title="사주팔자 운세", page_icon="🔮", layout="centered")
+    if not check_password():
+        st.stop()
     st.title("🔮 사주팔자 운세 (하이브리드)")
     st.caption("규칙 기반 만세력 + 대운 + AI 운세(금전·사업) · 생년월일시 기준 · 오락/참고용")
 
