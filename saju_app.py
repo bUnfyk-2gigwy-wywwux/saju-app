@@ -397,6 +397,12 @@ def huisin_lines(s):
     return f"{gen}\n이 일간({s['day_gan']}{s['day_elem']}) 기준 오행별 십성: {sib}"
 
 
+def gisin_lines():
+    ke = ' · '.join(f"용신 {e}→기신에 {ELEM_ORDER[(i - 2) % 5]} 포함" for i, e in enumerate(ELEM_ORDER))
+    gu = ' · '.join(f"기신 {e}→구신 {ELEM_ORDER[(i - 1) % 5]}" for i, e in enumerate(ELEM_ORDER))
+    return f"용신을 극하는 오행: {ke}\n기신을 생하는 오행: {gu}"
+
+
 def month_pillar_lines(year):
     """양력 year 년 1/1~12/31 의 날짜별 월건을 연속 구간으로 묶는다(sxtwl 절기 기준)."""
     runs = []
@@ -423,6 +429,8 @@ def jaegeukin_block(s):
         return f"""[가강 재극인 조건 — 엔진 판정: 적용]
 - 인성 {_el(insung)} {n}개 = 3개 이상·원국 오행 분포 최다(동률 포함), 일간 외 천간에 비겁 {_el(s['day_elem'])} 없음.
 - 용신: {jae}(재성) 단일 — 인성을 극하는 오행 / 희신: {siksang}(식상).
+- 기신: {insung}(인성) · {s['day_elem']}(비겁) — 인성은 용신이 극제하는 과다 오행, 비겁은 용신을 극하는 오행. 기신을 한 오행만 적지 않는다.
+- 구신: {ELEM_ORDER[(i - 2) % 5]}(인성을 생하는 오행). 이미 기신인 오행은 구신으로 부르지 않는다.
 - 이 판정이 1단계의 '인성을 설기·극제하는 방향' 문구보다 우선한다. 식상을 용신으로 잡지 않는다."""
     why = []
     if n < 3:
@@ -508,8 +516,13 @@ def relation_rule_block(s, year):
 - 용신을 생하는 오행은 용신으로 나열하지 않고 희신으로 표기한다.
 - 희신은 용신을 생하는 오행 하나로만 서술한다:
   {huisin_lines(s)}
+- 신약·신강과 관계없이 희신은 위 표대로 정한다(예: 용신이 인성이면 희신은 인성을 생하는 관성이며, 비겁이 아니다).
 - 희신을 십성 이름으로 부를 때는 위 오행별 십성과 일치하는 이름만 쓴다.
 - 원국에 없는 부재 오행이라는 이유로 희신이라 부르지 않는다. 부재 오행은 '부재(결핍) 오행'으로만 쓴다.
+- 용신을 극하는 오행은 반드시 기신으로 분류한다. 그 오행을 '기신이 아니다'·'기신은 아니나'로 쓰지 않는다.
+- 기신을 생하는 오행은 구신(仇神)으로 표기한다. '역기신'이라는 말은 쓰지 않는다.
+  단, 이미 기신인 오행은 구신으로 바꿔 부르지 않는다.
+{gisin_lines()}
 
 [상생상극 방향 고정 — 반복 오류 방지]
 {sanggeuk_lines()}
@@ -606,7 +619,7 @@ def ai_interpretation(s, gender, birth_label, luck, dae, toj, ref_label, is_toda
     import anthropic
     client = anthropic.Anthropic(api_key=api_key)
     msg = client.messages.create(
-        model=model, max_tokens=8000,
+        model=model, max_tokens=8000, temperature=0,
         messages=[{"role": "user",
                    "content": build_prompt(s, gender, birth_label, luck, dae, toj, ref_label, is_today)}],
     )
