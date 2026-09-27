@@ -50,6 +50,25 @@ SIBSEONG_GROUP = {
 }
 FAVORABLE_SIB = {'식신', '정재', '정관', '정인'}
 
+# ── 지지·천간 관계 기준표 (AI 해석 프롬프트용) ──
+# ~/saju-daily/daily_saju.py 기준표에서 이식. 궁합 엔진의 YUKHAP·SAMHAP·WONJIN(인덱스 set)과 별개다.
+TBL_YUKHAP = (('자축', '토'), ('인해', '목'), ('묘술', '화'), ('진유', '금'), ('사신', '수'), ('오미', '화'))
+TBL_CHUNG = ('자오', '축미', '인신', '묘유', '진술', '사해')
+TBL_HYEONG = (('인사신', '무은지형'), ('축술미', '지세지형'), ('자묘', '무례지형'))
+TBL_JAHYEONG = ('진', '오', '유', '해')
+TBL_PA = ('자유', '축진', '인해', '묘오', '사신', '미술')
+TBL_HAE = ('자미', '축오', '인사', '묘진', '신해', '유술')
+TBL_WONJIN = ('자미', '축오', '인유', '묘신', '진해', '사술')
+TBL_SAMHAP = (('화', '인오술'), ('수', '신자진'), ('금', '사유축'), ('목', '해묘미'))    # 생·왕·고 순
+TBL_BANGHAP = (('목', '인묘진', '동', '봄'), ('화', '사오미', '남', '여름'),
+               ('금', '신유술', '서', '가을'), ('수', '해자축', '북', '겨울'))
+TBL_GANHAP = (('갑기', '토'), ('을경', '금'), ('병신', '수'), ('정임', '목'), ('무계', '화'))
+TBL_JIJANGGAN = (('자', '임계'), ('축', '계신기'), ('인', '무병갑'), ('묘', '갑을'),
+                 ('진', '을계무'), ('사', '무경병'), ('오', '병기정'), ('미', '정을기'),
+                 ('신', '무임경'), ('유', '경신'), ('술', '신정무'), ('해', '무갑임'))    # 여기·중기·정기 순
+JJG = {ZHI.index(z): tuple(GAN.index(c) for c in g) for z, g in TBL_JIJANGGAN}
+assert [JJG[z][-1] for z in range(12)] == ZHI_MAIN_GAN, "지장간 정기와 ZHI_MAIN_GAN 불일치"
+
 GLOSSARY = {
     "천간(天干)": "갑을병정무기경신임계 10글자. 하늘의 기운을 나타냅니다.",
     "지지(地支)": "자축인묘진사오미신유술해 12글자. 땅의 기운이자 띠에 해당합니다.",
@@ -342,6 +361,164 @@ def tojeong_gua(year, month, day, is_lunar, is_leap, today=None):
 # ──────────────────────────────────────────────
 # AI 해석
 # ──────────────────────────────────────────────
+def _el(e):
+    return f"{e}({'木火土金水'[ELEM_ORDER.index(e)]})"
+
+
+_JJG_GRID = '\n'.join(
+    ''.join(f"{z} = {'·'.join(g)}".ljust(17) for z, g in TBL_JIJANGGAN[i:i + 3])
+    + f"{TBL_JIJANGGAN[i + 3][0]} = {'·'.join(TBL_JIJANGGAN[i + 3][1])}"
+    for i in (0, 4, 8))
+
+
+def natal_root_lines(s):
+    """원국 천간별로, 원국 지지 지장간 중 같은 오행인 글자를 나열한다."""
+    p = s['pillars']
+    keys = [k for k in ['년', '월', '일', '시'] if k in p]
+    out = []
+    for k in keys:
+        g = p[k]['gan']
+        roots = []
+        for zk in keys:
+            z = p[zk]['zhi']
+            pos = ('여기', '정기') if len(JJG[z]) == 2 else ('여기', '중기', '정기')
+            roots += [f"{ZHI[z]}({zk}지)의 {GAN[x]}({pos[i]})"
+                      for i, x in enumerate(JJG[z]) if GAN_ELEM[x] == GAN_ELEM[g]]
+        who = '일간' if k == '일' else f'{k}간'
+        out.append(f"- {GAN[g]}{GAN_ELEM[g]}({who}) — "
+                   + (', '.join(roots) if roots else '원국 지지 지장간에 같은 오행 없음(무근)'))
+    return '\n'.join(out)
+
+
+def huisin_lines(s):
+    dg = s['day_gan_idx']
+    gen = ' · '.join(f"용신 {e}→희신 {ELEM_ORDER[(i - 1) % 5]}" for i, e in enumerate(ELEM_ORDER))
+    sib = ' · '.join(f"{e}={SIBSEONG_GROUP[ten_god(dg, GAN_ELEM.index(e))]}" for e in ELEM_ORDER)
+    return f"{gen}\n이 일간({s['day_gan']}{s['day_elem']}) 기준 오행별 십성: {sib}"
+
+
+def month_pillar_lines(year):
+    """양력 year 년 1/1~12/31 의 날짜별 월건을 연속 구간으로 묶는다(sxtwl 절기 기준)."""
+    runs = []
+    d = datetime.date(year, 1, 1)
+    while d.year == year:
+        gz = sxtwl.fromSolar(d.year, d.month, d.day).getMonthGZ()
+        if runs and runs[-1][0] == (gz.tg, gz.dz):
+            runs[-1][2] = d
+        else:
+            runs.append([(gz.tg, gz.dz), d, d])
+        d += datetime.timedelta(days=1)
+    return '\n'.join(f"- {a:%m/%d}~{b:%m/%d} {GAN[t]}{ZHI[z]}월 — 월지 {ZHI[z]} = {_el(ZHI_ELEM[z])}"
+                     for (t, z), a, b in runs)
+
+
+def jaegeukin_block(s):
+    """가강 재극인 조건: 인성 오행 개수가 원국 오행 분포 최다(동률 포함)이고, 일간 외 천간에 비겁 오행이 없을 때만 적용."""
+    i = ELEM_ORDER.index(s['day_elem'])
+    insung, siksang, jae = ELEM_ORDER[(i - 1) % 5], ELEM_ORDER[(i + 1) % 5], ELEM_ORDER[(i + 2) % 5]
+    n, top = s['elem'][insung], max(s['elem'].values())
+    bi_gan = [GAN[p['gan']] for k, p in s['pillars'].items()
+              if k != '일' and GAN_ELEM[p['gan']] == s['day_elem']]
+    if n == top and not bi_gan:
+        return f"""[가강 재극인 조건 — 엔진 판정: 적용]
+- 인성 {_el(insung)} {n}개 = 원국 오행 분포 최다(동률 포함), 일간 외 천간에 비겁 {_el(s['day_elem'])} 없음.
+- 용신 = 재성 {_el(jae)} 1개(인성을 극하는 오행) / 희신 = 식상 {_el(siksang)}.
+- 이 판정이 1단계의 '인성을 설기·극제하는 방향' 문구보다 우선한다. 식상을 용신으로 잡지 않는다."""
+    why = []
+    if n != top:
+        why.append(f"인성 {_el(insung)} {n}개가 원국 오행 분포 최다({top}개)가 아님")
+    if bi_gan:
+        why.append(f"일간 외 천간에 비겁 {'·'.join(bi_gan)} 있음")
+    return f"""[가강 재극인 조건 — 엔진 판정: 미적용]
+- 사유: {' / '.join(why)}.
+- 재극인(재성으로 인성을 극함)을 근거로 용신을 정하지 말고, 위 1~2단계 절차로 판정한다."""
+
+
+def sanggeuk_lines():
+    sheng = '·'.join(f"{e}生{ELEM_ORDER[(i + 1) % 5]}" for i, e in enumerate(ELEM_ORDER))
+    ke = '·'.join(f"{e}克{ELEM_ORDER[(i + 2) % 5]}" for i, e in enumerate(ELEM_ORDER))
+    by = ' · '.join(f"{e}←{ELEM_ORDER[(i - 2) % 5]}" for i, e in enumerate(ELEM_ORDER))
+    return f"상생: {sheng}\n상극: {ke}\n극을 받는 오행←극하는 오행: {by}"
+
+
+def relation_rule_block(s, year):
+    return f"""[지지 관계 전체 기준표 — 구성 글자 오판 방지]
+아래 조합에 없는 글자를 해당 국(局)에 넣지 않는다. 특히 신(申)과 유(酉),
+사(巳)와 오(午)를 혼동하지 않는다.
+
+삼합(三合) — 생지·왕지·고지 3자 구조
+{chr(10).join(f'- {c} = {_el(e)}국  (생 {c[0]} · 왕 {c[1]} · 고 {c[2]})' for e, c in TBL_SAMHAP)}
+- 반합: 위 3자 중 2자만 모인 것. 왕지(자·오·묘·유)가 포함된 반합은 힘이 있고,
+  생지+고지만 모인 반합(예: 사축·신진)은 힘이 약하다. 왕지 포함 여부를 반드시 명시한다.
+
+방합(方合) — 계절·방위 연속 3자
+{chr(10).join(f'- {c} = {_el(e)} · {d} · {sea}' for e, c, d, sea in TBL_BANGHAP)}
+- 방합에는 반합 개념을 쓰지 않는다. 2자만 모이면 "부분 결집"으로만 서술한다.
+
+육합(六合) {len(TBL_YUKHAP)}쌍: {' · '.join(p for p, _ in TBL_YUKHAP)}
+육합 합화 오행: {' · '.join(f'{p}→{e}' for p, e in TBL_YUKHAP)}
+- 육합도 천간합과 같은 3단계(합화 → 합이불화 → 합거)로 판정한다.
+  합화 결과 오행이 지지(원국·운)에 뒷받침되면 합화로 본다.
+- '기신이 합으로 묶여 이득'이라고 쓰기 전에 합화 오행을 먼저 확인한다.
+  합화 오행이 이 사주의 기신이면 합화 시 기신이 되므로 이득으로 서술하지 않는다.
+충(沖) {len(TBL_CHUNG)}쌍: {' · '.join(TBL_CHUNG)}
+형(刑): {' · '.join(f'{c}({n})' for c, n in TBL_HYEONG)}
+자형(自刑): {' · '.join(z + z for z in TBL_JAHYEONG)} — 이 네 조합만 자형이다.
+  미미·묘묘·신신 등 나머지 같은 글자 중첩은 자형이 아니라 복음(伏吟)이다.
+파(破): {' · '.join(TBL_PA)}
+- 묘오(卯午)는 파(破)이며 합이 아니다. '묘오 합'으로 쓰지 않는다.
+해(害): {' · '.join(TBL_HAE)}
+원진(怨嗔): {' · '.join(TBL_WONJIN)}
+
+판정 절차: 일진 지지를 원국 지지·대운지·월건지·세운지 각각과 위 표에 대조하고,
+성립한 관계마다 그 글자가 년(세운)·월(월건)·일(일진)·대운 중 어디서 나온 것인지 반드시 병기한다.
+
+[지장간 전표와 통근 판정 — 합 해석의 필수 전제]
+지장간은 여기·중기·정기 순이다. 천간이 지지 지장간에 같은 오행을 두면 통근(通根)이며,
+통근 여부가 그 천간의 실질 힘과 합(合) 결과를 가른다.
+
+{_JJG_GRID}
+
+원국 천간의 통근 상태(엔진 산출 — 원국 지지 지장간과만 대조):
+{natal_root_lines(s)}
+- 무근인 천간도 일진·월건·세운·대운 지지의 지장간에 같은 오행이 있으면 그 운에서 통근을 얻는다.
+- 지장간 위치(여기·중기·정기=본기)는 위 전표 순서 그대로 인용한다(예: 미 = 정 여기 · 을 중기 · 기 본기).
+  전표와 다른 위치로 옮겨 쓰지 않는다.
+
+천간합(天干合) {len(TBL_GANHAP)}쌍: {' · '.join(f'{p[0]}{p[1]}합{e}' for p, e in TBL_GANHAP)}
+
+천간합이 성립하면 아래 3단계를 순서대로 판정하고, 결과를 명시한다.
+1. 합화(合化) — 합한 결과 오행이 지지에 뒷받침되면 다른 오행으로 변한다.
+2. 합이불화(合而不化) — 두 글자 중 어느 한쪽이라도 지지에 통근하면,
+   합은 되나 본래 성질을 유지하고 제 역할을 계속한다.
+3. 합거(合去) — 양쪽 모두 무근일 때만 둘 다 힘을 못 쓴다.
+1번을 탈락시켰다고 곧바로 3번으로 가지 않는다. 반드시 2번 통근 검사를 거친다.
+
+합은 쌍방이다. 용신이 묶였다는 서술만 쓰지 말고 상대 글자가 무엇인지 함께 판정한다.
+- 용신 + 용신 = 손해
+- 용신 + 기신 = 상쇄. 통근한 쪽이 본성을 유지한다.
+- 기신 + 기신 = 이득. 기신이 제어된다.
+
+{jaegeukin_block(s)}
+
+[용신·희신 판정 규칙]
+- 용신은 반드시 한 오행만 쓴다. 용신 2개를 나열하지 않는다(예: 'A → B', 'A·B' 식 병기 금지).
+- 용신을 생하는 오행은 용신으로 나열하지 않고 희신으로 표기한다.
+- 희신은 용신을 생하는 오행 하나로만 서술한다:
+  {huisin_lines(s)}
+- 희신을 십성 이름으로 부를 때는 위 오행별 십성과 일치하는 이름만 쓴다.
+- 원국에 없는 부재 오행이라는 이유로 희신이라 부르지 않는다. 부재 오행은 '부재(결핍) 오행'으로만 쓴다.
+
+[상생상극 방향 고정 — 반복 오류 방지]
+{sanggeuk_lines()}
+- 상생·상극 방향을 뒤집지 않는다(예: 土生金이므로 금이 토를 극한다고 쓰지 않는다).
+
+[월건표 — 절기 기준, {year}년]
+월별 흐름에서 달의 오행은 아래 표의 월지 오행으로만 서술한다. 양력 달 번호나 계절 감각으로
+여러 달을 한 오행으로 묶지 않는다(유월=金, 술월=土, 해·자월=水).
+{month_pillar_lines(year)}"""
+
+
 def build_prompt(s, gender, birth_label, luck, dae, toj, ref_label, is_today):
     p = s['pillars']
     table = "\n".join(
@@ -397,6 +574,10 @@ def build_prompt(s, gender, birth_label, luck, dae, toj, ref_label, is_today):
 5. 일진·세운·월건 판정
    - 일진 지지를 원국 지지뿐 아니라 세운 지지·월건 지지와도 대조해 삼합·방합·반합·형을 확인한다(예: 사+오+미 = 사오미 방합 화국).
    - 천간합(정임합 목 등)은 상대 글자가 지지에 통근하면 합이불화로 처리.
+6. 아래 기준표·통근표·재극인 조건·용신·희신 규칙·상생상극·월건표를 판정 근거로 쓴다.
+
+{relation_rule_block(s, y)}
+
 이 절차로 판정한 용신을 기준으로 성격·재물·직업·오늘/이번주/올해 운을 서술한다. 판정 근거(신강약·가강 여부·용신·희신·기신)를 해석 앞부분에 1~2줄로 밝힌다.
 
 아래 형식의 마크다운으로, 각 항목 2~4문장씩 한국어 격식체(~합니다)로 작성하십시오.
