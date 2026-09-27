@@ -413,18 +413,20 @@ def month_pillar_lines(year):
 
 
 def jaegeukin_block(s):
-    """가강 재극인 조건: 인성 오행 개수가 원국 오행 분포 최다(동률 포함)이고, 일간 외 천간에 비겁 오행이 없을 때만 적용."""
+    """가강 재극인 조건: 인성 오행 개수가 3개 이상이면서 원국 오행 분포 최다(동률 포함)이고, 일간 외 천간에 비겁 오행이 없을 때만 적용."""
     i = ELEM_ORDER.index(s['day_elem'])
     insung, siksang, jae = ELEM_ORDER[(i - 1) % 5], ELEM_ORDER[(i + 1) % 5], ELEM_ORDER[(i + 2) % 5]
     n, top = s['elem'][insung], max(s['elem'].values())
     bi_gan = [GAN[p['gan']] for k, p in s['pillars'].items()
               if k != '일' and GAN_ELEM[p['gan']] == s['day_elem']]
-    if n == top and not bi_gan:
+    if n >= 3 and n == top and not bi_gan:
         return f"""[가강 재극인 조건 — 엔진 판정: 적용]
-- 인성 {_el(insung)} {n}개 = 원국 오행 분포 최다(동률 포함), 일간 외 천간에 비겁 {_el(s['day_elem'])} 없음.
-- 용신 = 재성 {_el(jae)} 1개(인성을 극하는 오행) / 희신 = 식상 {_el(siksang)}.
+- 인성 {_el(insung)} {n}개 = 3개 이상·원국 오행 분포 최다(동률 포함), 일간 외 천간에 비겁 {_el(s['day_elem'])} 없음.
+- 용신: {jae}(재성) 단일 — 인성을 극하는 오행 / 희신: {siksang}(식상).
 - 이 판정이 1단계의 '인성을 설기·극제하는 방향' 문구보다 우선한다. 식상을 용신으로 잡지 않는다."""
     why = []
+    if n < 3:
+        why.append(f"인성 {_el(insung)} {n}개가 3개 미만")
     if n != top:
         why.append(f"인성 {_el(insung)} {n}개가 원국 오행 분포 최다({top}개)가 아님")
     if bi_gan:
