@@ -69,6 +69,28 @@ TBL_JIJANGGAN = (('자', '임계'), ('축', '계신기'), ('인', '무병갑'), 
 JJG = {ZHI.index(z): tuple(GAN.index(c) for c in g) for z, g in TBL_JIJANGGAN}
 assert [JJG[z][-1] for z in range(12)] == ZHI_MAIN_GAN, "지장간 정기와 ZHI_MAIN_GAN 불일치"
 
+# ── 궁통보감(窮通寶鑑) 용신제요: 일간 × 월지별 필요 글자(앞 글자가 우선) ──
+# 출처: 《窮通寶鑑·造化元鑰》 用神提要. 辛金 子월의 '申'은 오기로 보아 본문(丙甲 출간)에 따라 甲으로 교정.
+JOHU_MONTHS = '寅卯辰巳午未申酉戌亥子丑'
+JOHU_TABLE = {
+    '甲': ('丙癸', '庚丙丁戊己', '庚丁壬', '癸庚丁', '癸庚丁', '癸庚丁', '庚丁壬', '庚丁丙', '庚甲丁壬癸', '庚丁丙戊', '丁庚丙', '丁庚丙'),
+    '乙': ('丙癸', '丙癸', '癸丙戊', '癸', '癸丙', '癸丙', '丙癸己', '癸丙丁', '癸辛', '丙戊', '丙', '丙'),
+    '丙': ('壬庚', '壬己', '壬甲', '壬癸庚', '壬庚', '壬庚', '壬戊', '壬癸', '甲壬', '甲戊庚壬', '壬戊己', '壬甲'),
+    '丁': ('甲庚', '庚甲', '甲庚', '甲庚', '壬庚癸', '甲壬庚', '甲庚丙戊', '甲庚丙戊', '甲庚戊', '甲庚', '甲庚', '甲庚'),
+    '戊': ('丙甲癸', '丙甲癸', '甲丙癸', '甲丙癸', '壬甲丙', '癸丙甲', '丙癸甲', '丙癸', '甲丙癸', '甲丙', '丙甲', '丙甲'),
+    '己': ('丙庚甲', '甲癸丙', '丙癸甲', '癸丙', '癸丙', '癸丙', '丙癸', '丙癸', '甲丙癸', '丙甲戊', '丙甲戊', '丙甲戊'),
+    '庚': ('戊甲壬丙丁', '丁甲庚丙', '甲丁壬癸', '壬戊丙丁', '壬癸', '丁甲', '丁甲', '丁甲丙', '甲壬', '丁丙', '丁甲丙', '丙丁甲'),
+    '辛': ('己壬庚', '壬甲', '壬甲', '壬甲癸', '壬己癸', '壬庚甲', '壬甲戊', '壬甲', '壬甲', '壬丙', '丙戊壬甲', '丙壬戊己'),
+    '壬': ('庚丙戊', '戊辛庚', '甲庚', '壬辛庚癸', '癸庚辛', '辛甲', '戊丁', '甲庚', '甲丙', '戊丙庚', '戊丙', '丙丁甲'),
+    '癸': ('辛丙', '庚辛', '丙辛甲', '辛', '庚辛壬癸', '庚辛壬癸', '丁', '辛丙', '辛甲壬癸', '庚辛戊丁', '丙辛', '丙丁'),
+}
+TBL_GANCHUNG = ('갑경', '을신', '병임', '정계')
+# 자평진전 論用神: 격별로 돕는 글자(상신) 십성군
+SANGSIN = {'정재': ('식상', '관성'), '편재': ('식상', '관성'), '정관': ('재성', '인성'),
+           '정인': ('관성', '비겁'), '편인': ('관성', '비겁'), '식신': ('재성',), '편관': ('식상',),
+           '상관': ('인성', '재성'), '양인': ('관성',), '월겁': ('관성', '재성', '식상'),
+           '건록': ('관성', '재성', '식상')}
+
 GLOSSARY = {
     "천간(天干)": "갑을병정무기경신임계 10글자. 하늘의 기운을 나타냅니다.",
     "지지(地支)": "자축인묘진사오미신유술해 12글자. 땅의 기운이자 띠에 해당합니다.",
@@ -418,20 +440,55 @@ def month_pillar_lines(year):
                      for (t, z), a, b in runs)
 
 
+def jae_state(s):
+    """적천수 반국: 인성 과다에서 재성이 기(氣)를 가졌는지 판정한다. → (유기|약|무기, 사유)"""
+    i = ELEM_ORDER.index(s['day_elem'])
+    jae, sik = ELEM_ORDER[(i + 2) % 5], ELEM_ORDER[(i + 1) % 5]
+    p = s['pillars']
+    stems = [x['gan'] for k, x in p.items() if k != '일']
+    zhis = [x['zhi'] for x in p.values()]
+    jae_gan = [GAN[g] for g in stems if GAN_ELEM[g] == jae]
+    rooted = [ZHI[z] for z in zhis if any(GAN_ELEM[x] == jae for x in JJG[z])]
+    main_jae = [ZHI[z] for z in zhis if GAN_ELEM[ZHI_MAIN_GAN[z]] == jae]
+    if main_jae or (jae_gan and rooted):
+        return '유기', f"재성 {_el(jae)}: 천간 {'·'.join(jae_gan) or '없음'}, 뿌리 지지 {'·'.join(rooted)}"
+    # 조토(미·술)는 금을 생하지 못하므로 금 재성의 생조에서 제외한다(서락오 평주: 진축 습토, 술미 조토).
+    sik_z = [ZHI[z] for z in zhis if GAN_ELEM[ZHI_MAIN_GAN[z]] == sik and not (jae == '금' and ZHI[z] in '미술')]
+    sik_g = [GAN[g] for g in stems if GAN_ELEM[g] == sik]
+    has_jae = bool(jae_gan or rooted)
+    if has_jae and (sik_z or sik_g):
+        return '약', (f"재성 {_el(jae)} 뿌리 없음(천간 {'·'.join(jae_gan) or '없음'}), "
+                     f"식상 생조만 있음({'·'.join(sik_g + sik_z)})")
+    return '무기', f"재성 {_el(jae)} " + ('뿌리·생조 없음' if has_jae else '원국에 없음')
+
+
 def jaegeukin_block(s):
-    """가강 재극인 조건: 인성 오행 개수가 3개 이상이면서 원국 오행 분포 최다(동률 포함)이고, 일간 외 천간에 비겁 오행이 없을 때만 적용."""
+    """가강 재극인 조건: 인성 3개 이상·오행 최다·일간 외 천간 비겁 없음 + 재성 유기 판정(적천수 반국)."""
     i = ELEM_ORDER.index(s['day_elem'])
     insung, siksang, jae = ELEM_ORDER[(i - 1) % 5], ELEM_ORDER[(i + 1) % 5], ELEM_ORDER[(i + 2) % 5]
+    gwan = ELEM_ORDER[(i - 2) % 5]
     n, top = s['elem'][insung], max(s['elem'].values())
     bi_gan = [GAN[p['gan']] for k, p in s['pillars'].items()
               if k != '일' and GAN_ELEM[p['gan']] == s['day_elem']]
     if n >= 3 and n == top and not bi_gan:
-        return f"""[가강 재극인 조건 — 엔진 판정: 적용]
-- 인성 {_el(insung)} {n}개 = 3개 이상·원국 오행 분포 최다(동률 포함), 일간 외 천간에 비겁 {_el(s['day_elem'])} 없음.
+        state, why_jae = jae_state(s)
+        head = f"- 인성 {_el(insung)} {n}개 = 3개 이상·원국 오행 분포 최다(동률 포함), 일간 외 천간에 비겁 {_el(s['day_elem'])} 없음."
+        if state == '무기':
+            return f"""[가강 재극인 조건 — 엔진 판정: 미적용(모자멸자 母慈滅子)]
+{head}
+- 재성 판정: 무기 — {why_jae}. 재성으로 인성을 깰 수 없다(적천수 반국, 임철초 주).
+- 용신: {s['day_elem']}(비겁) — 인성의 흐름을 거스르지 않고 일간을 돕는다 / 희신: {insung}(인성).
+- 기신: {gwan}(관성) · {jae}(재성) · {siksang}(식상). 재성·식상 운은 인성을 거슬러 흉으로 본다.
+- 이 판정이 1단계의 '인성을 설기·극제하는 방향' 문구보다 우선한다. 재성을 용신으로 잡지 않는다."""
+        cond = ("" if state == '유기' else f"""
+- 조건부: 재성에 뿌리가 없다. 재성이 운에서 통근할 때만 재극인이 작동하며, 무기로 볼 여지가 있으므로 과거 대운으로 검증하라고 반드시 밝힌다.""")
+        return f"""[가강 재극인 조건 — 엔진 판정: 적용(군뢰신생 君賴臣生){'' if state == '유기' else ' · 조건부'}]
+{head}
+- 재성 판정: {state} — {why_jae}.
 - 용신: {jae}(재성) 단일 — 인성을 극하는 오행 / 희신: {siksang}(식상).
 - 기신: {insung}(인성) · {s['day_elem']}(비겁) — 인성은 용신이 극제하는 과다 오행, 비겁은 용신을 극하는 오행. 기신을 한 오행만 적지 않는다.
-- 구신: {ELEM_ORDER[(i - 2) % 5]}(인성을 생하는 오행). 이미 기신인 오행은 구신으로 부르지 않는다.
-- 이 판정이 1단계의 '인성을 설기·극제하는 방향' 문구보다 우선한다. 식상을 용신으로 잡지 않는다."""
+- 구신: {gwan}(인성을 생하는 오행). 이미 기신인 오행은 구신으로 부르지 않는다.
+- 이 판정이 1단계의 '인성을 설기·극제하는 방향' 문구보다 우선한다. 식상을 용신으로 잡지 않는다.{cond}"""
     why = []
     if n < 3:
         why.append(f"인성 {_el(insung)} {n}개가 3개 미만")
@@ -442,6 +499,163 @@ def jaegeukin_block(s):
     return f"""[가강 재극인 조건 — 엔진 판정: 미적용]
 - 사유: {' / '.join(why)}.
 - 재극인(재성으로 인성을 극함)을 근거로 용신을 정하지 말고, 위 1~2단계 절차로 판정한다."""
+
+
+# ──────────────────────────────────────────────
+# 세 렌즈 판독: 자평진전(그릇) · 궁통보감(온도) · 적천수(기세)
+# 코드는 사실만 산출하고, 최종 해석은 AI가 이 사실 위에서 작성한다.
+# ──────────────────────────────────────────────
+def gan_where(s, g):
+    """일간을 뺀 원국에서 글자 g의 위치. → (투출|암장|없음, 위치 설명)"""
+    p = s['pillars']
+    out = [f"{k}간" for k, x in p.items() if k != '일' and x['gan'] == g]
+    if out:
+        return '투출', '·'.join(out)
+    hid = [f"{ZHI[x['zhi']]}({k}지)" for k, x in p.items() if g in JJG[x['zhi']]]
+    return ('암장', '·'.join(hid)) if hid else ('없음', '')
+
+
+def gyeokguk(s):
+    """자평진전 월령 취격: 투간 → 회지 → 본기 순."""
+    dg, mz, p = s['day_gan_idx'], s['month_zhi'], s['pillars']
+    hidden, main = JJG[mz], JJG[mz][-1]
+    stems = [x['gan'] for k, x in p.items() if k != '일']
+    branches = {ZHI[x['zhi']] for x in p.values()}
+    touts = [g for g in reversed(hidden) if g in stems and SIBSEONG_GROUP[ten_god(dg, g)] != '비겁']
+    hoe = [(e, c) for e, c in TBL_SAMHAP if ZHI[mz] in c and set(c) <= branches]
+    half = [c for e, c in TBL_SAMHAP if ZHI[mz] in c and len(set(c) & branches) == 2]
+    if ZHI[mz] in '진술축미':
+        if touts:
+            pick, basis = touts[0], f"잡기 투간 {GAN[touts[0]]}"
+        elif hoe:
+            pick, basis = ZHI_MAIN_GAN[ZHI.index(hoe[0][1][1])], f"잡기 회지 {hoe[0][1]} {hoe[0][0]}국"
+        else:
+            pick, basis = main, "투간·회지 없음 → 토로 논해 본기 적용"
+    elif ZHI[mz] in '인신사해':
+        if main in stems or not touts:
+            pick, basis = main, ("본기 투출" if main in stems else "투출 없음 → 본기 적용")
+        else:
+            pick, basis = touts[0], f"본기 불투, {GAN[touts[0]]} 투출"
+    else:
+        pick, basis = main, "왕지 본기"
+    sib = ten_god(dg, pick)
+    key = sib if SIBSEONG_GROUP[sib] != '비겁' else ('건록' if sib == '비견' else ('양인' if GAN_YIN[dg] == 0 else '월겁'))
+    name = {'편관': '편관(칠살)격'}.get(key, f"{key}격")
+    return {'name': name, 'key': key, 'basis': basis, 'pick': GAN[pick],
+            'also': [GAN[g] for g in touts if g != pick], 'half': half}
+
+
+def sangsin_lines(s, gk):
+    dg, p = s['day_gan_idx'], s['pillars']
+    out = []
+    for grp in SANGSIN[gk['key']]:
+        gans = [GAN[x['gan']] for k, x in p.items() if k != '일' and SIBSEONG_GROUP[ten_god(dg, x['gan'])] == grp]
+        hid = [f"{GAN[g]}({ZHI[x['zhi']]})" for x in p.values() for g in JJG[x['zhi']]
+               if SIBSEONG_GROUP[ten_god(dg, g)] == grp]
+        state = f"천간 {'·'.join(gans)}" if gans else (f"지장간만 {'·'.join(hid)}" if hid else "없음")
+        out.append(f"{grp}: {state}")
+    return out
+
+
+def johu_needs(s):
+    """궁통보감 필요 글자와 원국 충족 상태."""
+    letters = JOHU_TABLE[GAN_HJ[s['day_gan_idx']]][JOHU_MONTHS.index(ZHI_HJ[s['month_zhi']])]
+    return [(GAN_HJ.index(c), *gan_where(s, GAN_HJ.index(c))) for c in letters]
+
+
+def _pair_in(a, b, table):
+    return a + b in table or b + a in table
+
+
+def branch_relations(a, b):
+    """지지 a·b(한글) 관계 목록."""
+    if a == b:
+        return ['자형' if a in TBL_JAHYEONG else '복음']
+    out = [f"육합({e})" for pr, e in TBL_YUKHAP if _pair_in(a, b, (pr,))]
+    if _pair_in(a, b, TBL_CHUNG):
+        out.append('충')
+    out += [f"형({n})" for c, n in TBL_HYEONG if a in c and b in c]
+    out += [n for n, tb in (('파', TBL_PA), ('해', TBL_HAE), ('원진', TBL_WONJIN)) if _pair_in(a, b, tb)]
+    return out
+
+
+def completed_guk(natal, added):
+    """원국 지지 + 운 지지로 새로 완성되는 삼합·방합."""
+    now = set(natal) | set(added)
+    out = [f"{c} {e}국(삼합)" for e, c in TBL_SAMHAP if set(c) <= now and not set(c) <= set(natal)]
+    out += [f"{c} {e}(방합)" for e, c, _, _ in TBL_BANGHAP if set(c) <= now and not set(c) <= set(natal)]
+    return out
+
+
+def luck_fact_lines(s, label, gz):
+    """운 간지 1개가 원국에 일으키는 사실을 나열한다."""
+    p = s['pillars']
+    g, z = GAN.index(gz[0]), ZHI.index(gz[1])
+    facts = []
+    for k, x in p.items():
+        a, b = GAN[g], GAN[x['gan']]
+        if any(_pair_in(a, b, (pr,)) for pr, _ in TBL_GANHAP):
+            facts.append(f"{k}간 {b} 천간합")
+        if _pair_in(a, b, TBL_GANCHUNG):
+            facts.append(f"{k}간 {b} 천간충")
+        facts += [f"{k}지 {ZHI[x['zhi']]} {r}" for r in branch_relations(gz[1], ZHI[x['zhi']])]
+    facts += [f"{c} 완성" for c in completed_guk([ZHI[x['zhi']] for x in p.values()], [gz[1]])]
+    supply = [GAN[c] for c, st, _ in johu_needs(s) if st != '투출' and (c == g or c in JJG[z])]
+    if supply:
+        facts.append(f"조후 글자 {'·'.join(supply)} 공급")
+    roots = [GAN[x['gan']] for k, x in p.items()
+             if not any(GAN_ELEM[h] == GAN_ELEM[x['gan']] for y in p.values() for h in JJG[y['zhi']])
+             and any(GAN_ELEM[h] == GAN_ELEM[x['gan']] for h in JJG[z])]
+    if roots:
+        facts.append(f"무근 천간 {'·'.join(roots)} 통근")
+    return f"- {label} {gz}({ten_god(s['day_gan_idx'], g)}): " + (' / '.join(facts) if facts else '두드러진 작용 없음')
+
+
+def three_lens_facts(s, dae, luck):
+    """세 렌즈 판독 사실표(화면·리포트·프롬프트 공용)."""
+    p, dg = s['pillars'], s['day_gan_idx']
+    gk = gyeokguk(s)
+    L = ["[자평진전 — 사회적 그릇]",
+         f"- 월령 {ZHI[s['month_zhi']]}(지장간 {'·'.join(GAN[g] for g in JJG[s['month_zhi']])}) → {gk['name']} (근거: {gk['basis']})"]
+    if gk['also']:
+        L.append(f"- 겸격 후보: {'·'.join(gk['also'])} 투출")
+    if gk['half']:
+        L.append(f"- 반회(격 변경 아님, 운에서 완성되면 재검토): {'·'.join(gk['half'])}")
+    L.append("- 상신 후보 — " + ' / '.join(sangsin_lines(s, gk)))
+    needs = johu_needs(s)
+    L += ["[궁통보감 — 온도]",
+          f"- {s['day_gan']}일간 {ZHI[s['month_zhi']]}월 필요 글자(우선순): " + ' → '.join(GAN[c] for c, _, _ in needs),
+          "- 충족 상태: " + ' / '.join(f"{GAN[c]} {st}" + (f"({w})" if w else '') for c, st, w in needs)]
+    sup = sum(s['groups'][g] for g in ('비겁', '인성'))
+    same = lambda z: any(GAN_ELEM[h] == s['day_elem'] for h in JJG[z])
+    state, why = jae_state(s)
+    L += ["[적천수 — 기세]",
+          f"- 득령 {'O' if same(s['month_zhi']) else 'X'} · 득지 {'O' if same(p['일']['zhi']) else 'X'} · 돕는 세력 {sup}개 / 빼는 세력 {sum(s['groups'].values()) - sup}개",
+          "- 흐름: " + ' → '.join(f"{g} {s['groups'][g]}" for g in ('인성', '비겁', '식상', '재성', '관성')),
+          f"- 재성 유기 판정: {state} — {why}"]
+    L.append("[대운·세운 작용]")
+    if dae.get('current'):
+        L.append(luck_fact_lines(s, '현재 대운', dae['current']['gz']))
+    L.append(luck_fact_lines(s, f"{luck['year_num']}년 세운", luck['year']['han']))
+    L.append(luck_fact_lines(s, '월건', luck['month']['han']))
+    past = [x for x in dae['seq'] if x['age'] + 9 < dae['cur_age']]
+    if past:
+        L.append("[과거 대운 — 검증 자료]")
+        L += [luck_fact_lines(s, f"{x['age']}세", x['gz']) for x in past]
+    return '\n'.join(L)
+
+
+def three_lens_block(s, dae, luck):
+    return f"""[세 렌즈 판독 — 엔진 산출 사실표. 글자·위치·관계를 바꾸지 말 것]
+{three_lens_facts(s, dae, luck)}
+
+[세 렌즈 통합 규칙]
+- 판독 순서: 자평진전(격·상신) → 궁통보감(필요 글자) → 적천수(강약·흐름·재성 유기) → 대운 → 세운.
+- 질문별 우선 렌즈: 직업·성취는 격국, 컨디션·지속성은 조후, 운의 길흉·감당력은 기세.
+- 세 렌즈가 함께 가리키는 글자를 최우선으로 쓴다. 갈리는 글자는 길흉을 단정하지 말고 어느 렌즈의 판단인지 밝혀 '조건부'로 쓴다.
+- 용신이라는 말을 쓸 때 격국 용신(월령의 주체)인지 억부·조후 용신(필요한 기운)인지 구분한다.
+- 대운 없이 세운만으로 판단하지 않는다. 신살·납음으로 격국·용신 판정을 바꾸지 않는다.
+- 이론으로 갈리는 판단은 과거 대운의 실제 경험으로 검증하도록 질문한다. 과거 사건을 지어내지 않는다."""
 
 
 def sanggeuk_lines():
@@ -589,7 +803,9 @@ def build_prompt(s, gender, birth_label, luck, dae, toj, ref_label, is_today):
 5. 일진·세운·월건 판정
    - 일진 지지를 원국 지지뿐 아니라 세운 지지·월건 지지와도 대조해 삼합·방합·반합·형을 확인한다(예: 사+오+미 = 사오미 방합 화국).
    - 천간합(정임합 목 등)은 상대 글자가 지지에 통근하면 합이불화로 처리.
-6. 아래 기준표·통근표·재극인 조건·용신·희신 규칙·상생상극·월건표를 판정 근거로 쓴다.
+6. 아래 세 렌즈 판독·기준표·통근표·재극인 조건·용신·희신 규칙·상생상극·월건표를 판정 근거로 쓴다.
+
+{three_lens_block(s, dae, luck)}
 
 {relation_rule_block(s, y)}
 
@@ -599,10 +815,12 @@ def build_prompt(s, gender, birth_label, luck, dae, toj, ref_label, is_today):
 과장·미신적 단정은 피하고, 경향성과 실행 조언 위주로 쓰십시오.
 
 ## 총평
+## 세 렌즈 교차 판독 (그릇·온도·기세의 합의점과 갈리는 점)
 ## 성격과 기질
 ## 오행 균형과 보완 방향
 ## 직업·재물 경향
 ## 대운 흐름 (10년 주기)
+## 과거 대운 검증 질문 (판단이 갈리는 구간 1~3개를 질문으로만 제시)
 ## {pd_}의 운세 — 금전·사업
 ## {pd_} 팁 & 처세
 ## {pw} 흐름 — 금전·사업
@@ -644,6 +862,7 @@ def build_report(s, birth_label, gender, luck, dae, good, toj, ai_text):
           "## 대운 (10년 주기)",
           f"- 방향: {'순행' if dae['forward'] else '역행'} · 대운수: {dae['dae_num']}"]
     L += [f"- {x['age']}세: {x['gz']} ({x['sib']})" for x in dae['seq']]
+    L += ["", "## 세 렌즈 판독 (자평진전·궁통보감·적천수)", three_lens_facts(s, dae, luck)]
     L += ["", "## 간지 흐름 (기준일 기준)",
           f"- 일진({luck['date']}): {luck['day']['han']} ({luck['day']['gan_sib']})",
           f"- 월건: {luck['month']['han']} ({luck['month']['gan_sib']})",
@@ -1049,6 +1268,11 @@ def main():
         st.write("- **흐름**: " + " · ".join(
             (f"**{x['age']}세 {x['gz']}({x['sib']})**" if x is cur else f"{x['age']}세 {x['gz']}({x['sib']})")
             for x in dae['seq']))
+
+        st.markdown("### 🔎 세 렌즈 판독 (그릇·온도·기세)")
+        with st.expander("자평진전 · 궁통보감 · 적천수 판독 사실표 — 펼치기", expanded=True):
+            st.markdown('\n'.join(f"\n**{x}**\n" if x.startswith('[') else x
+                                   for x in three_lens_facts(s, dae, luck).split('\n')))
 
         st.markdown(f"### 📅 {pd_}·{pm}·{py_} (간지) — 기준일 {ref}")
         st.write(f"- **{pd_} 일진**: {luck['day']['han']} (십성 {luck['day']['gan_sib']})")
