@@ -261,12 +261,17 @@ def rule_based_summary(s):
         f"**오행 우세**: {most}({elem[most]}개)"
         + (f" / **부재 오행**: {', '.join(least)}" if least else " / 부재 오행 없음"),
     ]
-    if s['strength'] == '신강':
+    mode, roles = element_roles(s)
+    if mode in ('jae', 'mother'):
+        lines[1] = (f"**신강/신약**: 오행 개수로는 {s['strength']} → 정밀 판정 **{refined_strength(s)}**"
+                    + ("" if s['time_known'] else " · 시각 미상이라 시주 제외(정밀도 다소 낮음)"))
+        hint = role_summary(s)
+    elif s['strength'] == '신강':
         hint = "일간이 강한 편 → 식상·재성·관성으로 기운을 흘려보내는 방향 참고"
     elif s['strength'] == '신약':
         hint = "일간이 약한 편 → 인성·비겁으로 일간을 돕는 방향 참고"
     else:
-        hint = "기운이 비교적 균형 → 부재·약한 오행을 보완하는 방향 참고"
+        hint = "기운이 비교적 균형 → 월령에 필요한 조후 글자를 우선 보완하는 방향 참고"
     lines.append(f"**보완 방향(참고)**: {hint}")
     return "\n\n".join(lines)
 
@@ -307,7 +312,7 @@ def good_days(s, n=45, count=5, today=None):
         dt = today + datetime.timedelta(days=i)
         gz = sxtwl.fromSolar(dt.year, dt.month, dt.day).getDayGZ()
         sib = ten_god(g, gz.tg)
-        if sib in FAVORABLE_SIB:
+        if sib in FAVORABLE_SIB and not day_conflicts_roles(s, GAN[gz.tg] + ZHI[gz.dz]):
             out.append({'date': dt.isoformat(), 'wd': '월화수목금토일'[dt.weekday()],
                         'gz': GAN[gz.tg] + ZHI[gz.dz], 'sib': sib})
         if len(out) >= count:
@@ -645,9 +650,170 @@ def three_lens_facts(s, dae, luck):
     return '\n'.join(L)
 
 
+# ──────────────────────────────────────────────
+# 자세한 풀이: 총론·대운·연운을 기존 기준과 비교
+# ──────────────────────────────────────────────
+ROLE_SCORE = {'용신': 2, '희신': 1, '구신': -1, '기신': -2}
+GROUP_ACTION = {'비겁': '경쟁·동업·자금 분산', '식상': '생산·영업·콘텐츠', '재성': '매출·거래·투자',
+                '관성': '직위·계약·책임', '인성': '문서·자격·학습'}
+VERDICT_ACTION = {'유리': '추진', '혼조': '선별 추진', '주의': '방어·내실'}
+
+
+def element_roles(s):
+    """오행별 역할. → (판정 방식, {오행: 역할})"""
+    i = ELEM_ORDER.index(s['day_elem'])
+    bi, sik, jae, gwan, ins = (ELEM_ORDER[(i + k) % 5] for k in range(5))
+    n, top = s['elem'][ins], max(s['elem'].values())
+    bi_gan = [x for k, x in s['pillars'].items() if k != '일' and GAN_ELEM[x['gan']] == bi]
+    if n >= 3 and n == top and not bi_gan:
+        if jae_state(s)[0] == '무기':
+            return 'mother', {bi: '용신', ins: '희신', gwan: '기신', jae: '기신', sik: '기신'}
+        return 'jae', {jae: '용신', sik: '희신', ins: '기신', bi: '기신', gwan: '구신'}
+    if s['strength'] == '신강':
+        return 'strong', {sik: '희신', jae: '희신', gwan: '희신', ins: '구신', bi: '구신'}
+    if s['strength'] == '신약':
+        return 'weak', {ins: '희신', bi: '희신', sik: '구신', jae: '구신', gwan: '구신'}
+    return 'balanced', {GAN_ELEM[c]: '희신' for c, st, _ in johu_needs(s)[:2] if st != '투출'}
+
+
+def refined_strength(s):
+    return {'jae': '가강(인성 과다)', 'mother': '인성 과다(모자멸자)'}.get(element_roles(s)[0], s['strength'])
+
+
+def role_summary(s):
+    _, roles = element_roles(s)
+    good = [f"{_el(e)} {r}" for r in ('용신', '희신') for e, x in roles.items() if x == r]
+    bad = [f"{_el(e)} {r}" for r in ('기신', '구신') for e, x in roles.items() if x == r]
+    return f"유리한 기운 {'·'.join(good) or '조후 글자 우선'} / 주의할 기운 {'·'.join(bad) or '없음'}"
+
+
+def _new_guk(natal, added):
+    """(오행, 글자) — 이번 운 지지가 들어와 새로 완성되는 삼합·방합."""
+    base, z = set(natal), added
+    out = [(e, c, '삼합') for e, c in TBL_SAMHAP if z in c and set(c) <= base | {z} and not set(c) <= base]
+    out += [(e, c, '방합') for e, c, _, _ in TBL_BANGHAP if z in c and set(c) <= base | {z} and not set(c) <= base]
+    return out
+
+
+def day_conflicts_roles(s, gz):
+    """재극인 판정이 있는 원국에서 기신·구신 천간, 기신 지지, 기신 국 완성 날을 거른다."""
+    mode, roles = element_roles(s)
+    if mode not in ('jae', 'mother'):
+        return False
+    g, z = GAN.index(gz[0]), ZHI.index(gz[1])
+    if roles.get(GAN_ELEM[g]) in ('기신', '구신') or roles.get(ZHI_ELEM[z]) == '기신':
+        return True
+    natal = [ZHI[x['zhi']] for x in s['pillars'].values()]
+    return any(roles.get(e) == '기신' for e, _, _ in _new_guk(natal, gz[1]))
+
+
+def luck_verdict(s, gz, kind, base_zhi=()):
+    """운 1개 판정. 대운은 지지, 세운은 천간에 가중치(연해자평 大運看支·歲君看干)."""
+    _, roles = element_roles(s)
+    p = s['pillars']
+    g, z = GAN.index(gz[0]), ZHI.index(gz[1])
+    w_g, w_z = (1, 2) if kind == '대운' else (2, 1)
+    r_g, r_z = roles.get(GAN_ELEM[g], '한신'), roles.get(ZHI_ELEM[z], '한신')
+    score = w_g * ROLE_SCORE.get(r_g, 0) + w_z * ROLE_SCORE.get(r_z, 0)
+    why = [f"천간 {gz[0]} = {GAN_ELEM[g]}({r_g})", f"지지 {gz[1]} = {ZHI_ELEM[z]}({r_z})"]
+    supply = [GAN[c] for c, st, _ in johu_needs(s) if st != '투출' and (c == g or c in JJG[z])]
+    if supply:
+        score += 1
+        why.append(f"궁통보감 필요 글자 {'·'.join(supply)} 공급")
+    for k, x in p.items():
+        if k != '일' and roles.get(GAN_ELEM[x['gan']]) == '용신':
+            if any(_pair_in(gz[0], GAN[x['gan']], (pr,)) for pr, _ in TBL_GANHAP):
+                score -= 2
+                why.append(f"{k}간 용신 {GAN[x['gan']]} 합거(묶임)")
+            has_root = any(GAN_ELEM[h] == GAN_ELEM[x['gan']] for y in p.values() for h in JJG[y['zhi']])
+            if not has_root and any(GAN_ELEM[h] == GAN_ELEM[x['gan']] for h in JJG[z]):
+                score += 1
+                why.append(f"무근 용신 {GAN[x['gan']]} 통근")
+    natal = [ZHI[x['zhi']] for x in p.values()] + list(base_zhi)
+    for e, c, typ in _new_guk(natal, gz[1]):
+        r = roles.get(e, '한신')
+        score += ROLE_SCORE.get(r, 0)
+        why.append(f"{c} {typ} 완성({e}·{r})")
+    moves = [f"{k}지 {ZHI[x['zhi']]} 충" for k, x in p.items()
+             if _pair_in(gz[1], ZHI[x['zhi']], TBL_CHUNG)]
+    moves += [f"대운 {b} 충" for b in base_zhi if _pair_in(gz[1], b, TBL_CHUNG)]
+    verdict = '유리' if score >= 2 else ('주의' if score <= -2 else '혼조')
+    return {'verdict': verdict, 'score': score, 'why': why, 'moves': moves,
+            'split': bool(supply) and verdict == '주의', 'group': SIBSEONG_GROUP[ten_god(s['day_gan_idx'], g)]}
+
+
+def legacy_verdict(s, gz):
+    """이전 앱의 보완 방향 기준(오행 개수)으로 본 판정."""
+    g, z = GAN.index(gz[0]), ZHI.index(gz[1])
+    groups = [SIBSEONG_GROUP[ten_god(s['day_gan_idx'], g)], SIBSEONG_GROUP[ten_god(s['day_gan_idx'], ZHI_MAIN_GAN[z])]]
+    if s['strength'] == '중화':
+        missing = {e for e, v in s['elem'].items() if v == 0}
+        return '유리' if {GAN_ELEM[g], ZHI_ELEM[z]} & missing else '보통'
+    good = {'신강': ('식상', '재성', '관성'), '신약': ('인성', '비겁')}[s['strength']]
+    hits = sum(x in good for x in groups)
+    return '유리' if hits == 2 else ('주의' if hits == 0 else '보통')
+
+
+def _luck_item(s, label, gz, kind, base_zhi=()):
+    v, old = luck_verdict(s, gz, kind, base_zhi), legacy_verdict(s, gz)
+    L = [f"- **{label} {gz}** — 세 렌즈 **{v['verdict']}** · 기존 기준 {old}",
+         f"  - 근거: {' / '.join(v['why'])}",
+         f"  - 실무: {GROUP_ACTION[v['group']]} 영역은 {VERDICT_ACTION[v['verdict']]}"]
+    if v['moves']:
+        L.append(f"  - 변동: {' / '.join(v['moves'])} — 이동·계약·관계 변화 점검")
+    if v['split']:
+        L.append("  - 렌즈 갈림: 궁통보감은 필요 글자가 들어와 긍정, 적천수 기세로는 부담 — 실제 경험으로 검증")
+    if old != v['verdict'] and not (old == '보통' and v['verdict'] == '혼조'):
+        L.append(f"  - 달라진 점: 기존 {old} → 세 렌즈 {v['verdict']} (용신·조후·국 완성 반영)")
+    return L
+
+
+def detail_reading(s, dae, luck):
+    """총론·대운·연운 풀이(기존 기준 대비)."""
+    gk, needs = gyeokguk(s), johu_needs(s)
+    state, why = jae_state(s)
+    missing = [e for e, v in s['elem'].items() if v == 0]
+    old_dir = {'신강': '식상·재성·관성으로 설기', '신약': '인성·비겁으로 보강'}.get(
+        s['strength'], f"부재 오행 {'·'.join(missing)} 보완" if missing else "약한 오행 보완")
+    L = ["### 총론 — 기존 풀이와 달라진 점",
+         f"- **강약**: 기존 {s['strength']} → **{refined_strength(s)}**",
+         f"- **보완 방향**: 기존 {old_dir} → **{role_summary(s)}**",
+         f"- **격국**: 기존 판정 없음 → **{gk['name']}** ({gk['basis']})",
+         f"- **상신**: 기존 판정 없음 → {' / '.join(sangsin_lines(s, gk))}",
+         "- **조후**: 기존 판정 없음 → " + ' / '.join(f"{GAN[c]} {st}" for c, st, _ in needs),
+         f"- **재성 힘**: 기존 판정 없음 → **{state}** ({why})"]
+    missing_needs = [GAN[c] for c, st, _ in needs if st == '없음']
+    if missing_needs:
+        L.append(f"- **핵심 과제**: 원국에 없는 글자({'·'.join(missing_needs)})가 운에서 들어오는 시기가 승부처")
+    birth_year = luck['year_num'] - dae['cur_age'] + 1
+    L += ["", "### 대운 풀이"]
+    for x in dae['seq']:
+        now = dae['current'] and x['gz'] == dae['current']['gz']
+        y0 = birth_year + x['age'] - 1
+        L += _luck_item(s, f"{x['age']}~{x['age'] + 9}세({y0}~{y0 + 9}{' · 현재' if now else ''})", x['gz'], '대운')
+    L += ["", "### 연운 풀이 (올해부터 5년)"]
+    for y in range(luck['year_num'], luck['year_num'] + 5):
+        yg = sxtwl.fromSolar(y, 6, 1).getYearGZ()
+        gz = GAN[yg.tg] + ZHI[yg.dz]
+        idx = (y - birth_year + 1 - dae['dae_num']) // 10
+        base = [dae['seq'][idx]['gz'][1]] if 0 <= idx < len(dae['seq']) else []
+        name = f"{y}년(대운 {dae['seq'][idx]['gz']})" if base else f"{y}년"
+        L += _luck_item(s, name, gz, '세운', base)
+    checks = [x for x in dae['seq'] if x['age'] + 9 < dae['cur_age']
+              and luck_verdict(s, x['gz'], '대운')['split']]
+    if checks:
+        L += ["", "### 판정 검증 질문"]
+        L += [f"- {x['age']}~{x['age'] + 9}세 {x['gz']} 대운의 재물·일·건강·관계가 실제로 어땠나요? "
+              "좋았다면 용신 판정을 다시 검토해야 합니다." for x in checks]
+    return '\n'.join(L)
+
+
 def three_lens_block(s, dae, luck):
     return f"""[세 렌즈 판독 — 엔진 산출 사실표. 글자·위치·관계를 바꾸지 말 것]
 {three_lens_facts(s, dae, luck)}
+
+[엔진 판정 — 총론·대운·연운. 유리/혼조/주의 등급을 바꾸지 말고 풀어서 설명할 것]
+{detail_reading(s, dae, luck)}
 
 [세 렌즈 통합 규칙]
 - 판독 순서: 자평진전(격·상신) → 궁통보감(필요 글자) → 적천수(강약·흐름·재성 유기) → 대운 → 세운.
@@ -856,12 +1022,13 @@ def build_report(s, birth_label, gender, luck, dae, good, toj, ai_text):
             L.append(f"- {k}주: {p[k]['han']}({p[k]['hanja']}) · 천간 {p[k]['gan_sib']} · 지지 {p[k]['zhi_sib']}")
     if not s['time_known']:
         L.append("- 시주: 미상")
-    L += [f"- 일간: {s['day_gan']}({s['day_elem']}·{s['day_yin']}) / 신강·신약: {s['strength']}", "",
+    L += [f"- 일간: {s['day_gan']}({s['day_elem']}·{s['day_yin']}) / 신강·신약: {refined_strength(s)}", "",
           "## 오행 분포", ", ".join(f"{e} {s['elem'][e]}개" for e in ELEM_ORDER), "",
           "## 규칙 기반 요약", rule_based_summary(s).replace("**", ""), "",
           "## 대운 (10년 주기)",
           f"- 방향: {'순행' if dae['forward'] else '역행'} · 대운수: {dae['dae_num']}"]
     L += [f"- {x['age']}세: {x['gz']} ({x['sib']})" for x in dae['seq']]
+    L += ["", "## 자세한 풀이 (기존 풀이와 비교)", detail_reading(s, dae, luck)]
     L += ["", "## 세 렌즈 판독 (자평진전·궁통보감·적천수)", three_lens_facts(s, dae, luck)]
     L += ["", "## 간지 흐름 (기준일 기준)",
           f"- 일진({luck['date']}): {luck['day']['han']} ({luck['day']['gan_sib']})",
@@ -881,7 +1048,11 @@ def to_plaintext(report_md):
     out = []
     for line in report_md.splitlines():
         l = line.replace('**', '')
-        if l.startswith('## '):
+        if l.startswith('### '):
+            l = '▶ ' + l[4:]
+        elif l.startswith('  - '):
+            l = '   - ' + l[4:]
+        elif l.startswith('## '):
             l = '■ ' + l[3:]
         elif l.startswith('# '):
             l = '【' + l[2:] + '】'
@@ -1269,6 +1440,9 @@ def main():
             (f"**{x['age']}세 {x['gz']}({x['sib']})**" if x is cur else f"{x['age']}세 {x['gz']}({x['sib']})")
             for x in dae['seq']))
 
+        st.markdown("### 📜 자세한 풀이 — 기존 풀이와 달라진 점")
+        st.markdown(detail_reading(s, dae, luck))
+
         st.markdown("### 🔎 세 렌즈 판독 (그릇·온도·기세)")
         with st.expander("자평진전 · 궁통보감 · 적천수 판독 사실표 — 펼치기", expanded=True):
             st.markdown('\n'.join(f"\n**{x}**\n" if x.startswith('[') else x
@@ -1283,7 +1457,7 @@ def main():
         if good:
             for gd in good:
                 st.write(f"- **{gd['date']}({gd['wd']})** · {gd['gz']}일 · 길신 {gd['sib']}")
-            st.caption("※ 일간 기준 길신일(식신·정재·정관·정인)을 추린 간이 택일입니다. 정통 택일과 다를 수 있습니다.")
+            st.caption("※ 일간 기준 길신일(식신·정재·정관·정인)에서 원국의 기신과 부딪히는 날을 뺀 간이 택일입니다. 정통 택일과 다를 수 있습니다.")
         else:
             st.write("향후 45일 내 해당 길일이 없습니다.")
 

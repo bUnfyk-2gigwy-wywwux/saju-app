@@ -81,6 +81,23 @@ def test_relations():
     assert any('인묘진' in x for x in A.completed_guk(['묘', '미', '진'], ['인']))
 
 
+def test_roles_and_verdict():
+    s = chart('임자', '병자', '갑자', '무자')          # 인성 과다·재성 약
+    assert A.element_roles(s)[0] == 'jae'
+    assert A.element_roles(chart('임자', '임인', '갑자', '임신'))[0] == 'mother'
+    assert A.luck_verdict(s, '무진', '대운')['verdict'] == '유리'
+    assert A.luck_verdict(s, '임자', '대운')['verdict'] == '주의'
+    assert A.day_conflicts_roles(s, '임자') and not A.day_conflicts_roles(s, '무진')
+
+
+def test_detail_reading_sections():
+    s = A.compute_saju(1978, 8, 20, 9)
+    today = datetime.date(2026, 11, 19)
+    text = A.detail_reading(s, A.major_luck(s, 1978, 8, 20, False, False, '남성', today=today), A.luck_context(s, today=today))
+    for key in ('### 총론', '### 대운 풀이', '### 연운 풀이', '2030년'):
+        assert key in text, key
+
+
 def test_real_charts_build_prompt():
     today = datetime.date(2026, 11, 19)
     for y, m, d, h, sex in [(1978, 8, 20, 9, '남성'), (1990, 3, 15, 14, '여성'), (1990, 3, 15, None, '여성')]:
